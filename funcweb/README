@@ -1,0 +1,34 @@
+funcweb
+=======
+
+A web interface to func, using TurboGears.
+
+This project is currently under development.  It is currently a
+proof-of-concept and should not be used in a production environment.
+
+Running
+=======
+
+ 1) Setup func.  https://fedorahosted.org/func/wiki/InstallAndSetupGuide
+
+    You can give your user access to run func, allowing you to run funcweb 
+    as a non-root user, by doing the following:
+
+        setfacl -d -R -m 'u:MYUSER:rX' /etc/pki/certmaster/
+        setfacl -R -m 'u:MYUSER:rX' /etc/pki/certmaster/
+
+ 2) Install the necessary software
+
+    yum install TurboGears python-genshi pam-devel
+
+ 3) Setup and run funcweb
+
+    ./start-funcweb.py
+
+ 4) Use funcweb
+
+    Connect to http://localhost:51236
+
+Authors
+=======
+Luke Macken <lmacken@redhat.com>

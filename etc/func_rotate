@@ -1,0 +1,12 @@
+/var/log/func/*.log {
+   missingok
+   notifempty
+   rotate 4
+   weekly
+   sharedscripts
+   postrotate
+      if [ -f /var/lock/subsys/funcd ]; then
+         /etc/init.d/funcd condrestart > /dev/null
+      fi
+   endscript
+}

@@ -1,0 +1,176 @@
+#!/usr//bin/python
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Library General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+# 2008 Adrian Likins <alikins@redhat.com>
+
+# script to migrate pre func/certmaster 0.17 to the split func/certmaster 
+# locations and formats from 0.17 and later versions
+
+
+import os
+import subprocess
+import ConfigParser
+
+from func import commonconfig
+from func import config
+
+from certmaster import commonconfig as cm_commonconfig
+from certmaster import config as cm_config
+
+# files that have moved
+#
+#  minion certs moved from /etc/pki/func to /etc/pki/certmaster
+#  overlord certs moved /var/lib/func/certmaster to /var/lib/certmaster/certmaster
+#
+# /etc/func/minion.conf still exists, but parts of config moved to /etc/certmaster/minion.conf
+
+
+FUNC_MINION_CONF="/etc/func/minion.conf"
+CERTMASTER_MINION_CONF="/etc/certmaster/minion.conf"
+
+FUNC_MINION_CERT_DIR="/etc/pki/func/"
+CERTMASTER_MINION_CERT_DIR="/etc/pki/certmaster/"
+
+
+# the file gets moved on package update, so check the rpm update
+FUNC_CERTMASTER_CONF="/etc/func/certmaster.conf"
+CERTMASTER_CONF="/etc/certmaster/certmaster.conf"
+
+
+FUNC_CERTMASTER_CERT_DIR="/var/lib/func/certmaster/"
+CERTMASTER_CERT_DIR="/var/lib/certmaster/"
+
+
+def func_minion_has_cert_info():
+    fmc_content = open(FUNC_MINION_CONF, 'r').readlines()
+    for line in fmc_content:
+        match  = line.find("cert_dir")
+        if match != -1 and match == 0:
+             return True
+    return False
+
+def func_certmaster_has_info(option):
+    if not os.path.exists(FUNC_CERTMASTER_CONF):
+        return False
+    cmc_content = open(FUNC_CERTMASTER_CONF, 'r').readlines()
+    for line in cmc_content:
+        match  = line.find(option)
+        if match != -1 and match == 0:
+             return True
+    return False
+
+def read_config(config_file, key):
+    cfg = ConfigParser.SafeConfigParser()
+    cfg.read(config_file)
+    try:
+        return cfg.get("main", key)
+    except ConfigParser.NoOptionError:
+        return None
+
+def migrate_minion_conf_settings():
+
+    # see if we have edited this file before
+    cmc = cm_config.read_config(CERTMASTER_CONF, cm_commonconfig.CMConfig)
+    cm_mc = cm_config.read_config(CERTMASTER_MINION_CONF, cm_commonconfig.MinionConfig)
+
+    if func_minion_has_cert_info():
+        fc_f = open(FUNC_MINION_CONF, "r")
+
+        # we can't rely on the new config class to read the old config
+        # files, so we do it the old fashioned way
+        migrated = False
+        if read_config(FUNC_MINION_CONF, "migrated"):
+            migrated = True
+            
+        if migrated == False:
+            cert_master = read_config(FUNC_MINION_CONF, "certmaster")
+
+            if cert_master:
+                cmc.certmaster = cert_master
+                cm_mc.certmaster = cert_master
+
+
+    if func_certmaster_has_info("listen_addr"):
+        #migrate settings from funcs certmater config to the new certmaster.conf
+        list_addr = read_config(FUNC_CERTMASTER_CONF, "listen_addr")
+        if list_addr:
+            cmc.listen_addr = list_addr
+
+    if func_certmaster_has_info("autosign"):
+        autosign = read_config(FUNC_CERTMASTER_CONF, "autosign")
+        if autosign:
+            cmc.autosign = autosign
+
+
+    # also, the config class we current use config.py:BaseConfig kind of sucks
+    # for migration stuff. Basically, we can't read values that aren't defined,
+    # we can't right stuff that isnt define, etc. 
+
+
+    # there doesnt' seem to be an obvious way to
+    # add something to a config obj/file without
+    # changing the corresponding config class, 
+    # so this is a kluge
+
+    fc_f = open(FUNC_MINION_CONF, "a+")
+    fc_f.write("migrated = 1\n")
+    fc_f.close()
+
+
+    cmc.write(open(CERTMASTER_CONF, 'w'))
+    cm_mc.write(open(CERTMASTER_MINION_CONF, 'w'))
+
+
+if os.access(FUNC_MINION_CONF, os.R_OK):
+    if os.access(CERTMASTER_MINION_CONF, os.R_OK):
+        fmc_content = open(FUNC_MINION_CONF, 'r').readlines()
+        cmc_content = open(CERTMASTER_MINION_CONF, 'r').readlines()
+        migrate_minion_conf_settings()
+                
+
+# if we've configure a non default cert dir, migrate it to the new default location
+# note that we do no migrate the old config settings. basically, everyone gets moved to
+# the new default cert dir. 
+
+cert_dir = read_config(FUNC_MINION_CONF, "cert_dir")
+
+if cert_dir:
+    FUNC_MINION_CERT_DIR = cert_dir
+
+if os.access(FUNC_MINION_CERT_DIR, os.R_OK):
+
+    output = subprocess.Popen("cp -var %s/* %s" % (
+        FUNC_MINION_CERT_DIR, 
+        CERTMASTER_MINION_CERT_DIR
+    ), shell=True,  stdout=subprocess.PIPE).communicate()[0]
+
+if os.access(FUNC_CERTMASTER_CERT_DIR, os.R_OK):
+
+    output = subprocess.Popen([
+        "cp", 
+        "-var", 
+        FUNC_CERTMASTER_CERT_DIR, 
+        CERTMASTER_CERT_DIR
+    ], stdout=subprocess.PIPE).communicate()[0]
+               
+if os.access("/etc/pki/certmaster/ca/funcmaster.crt", os.R_OK):
+
+    os.rename("/etc/pki/certmaster/ca/funcmaster.crt", 
+              "/etc/pki/certmaster/ca/certmaster.crt")
+    os.rename("/etc/pki/certmaster/ca/funcmaster.key", 
+              "/etc/pki/certmaster/ca/certmaster.key")                                                                                                                   
+
+
+
